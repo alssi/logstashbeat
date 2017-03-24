@@ -98,6 +98,8 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 func (bt *Logstashbeat) Run(b *beat.Beat) error {
     logp.Info("logstashbeat is running! Hit CTRL-C to stop it.")
 
+    bt.client = b.Publisher.Connect()
+
     for _, u := range bt.urls {
         go func(u *url.URL) {
 
@@ -206,7 +208,6 @@ func (bt *Logstashbeat) Run(b *beat.Beat) error {
                     logp.Warn("Ignoring tick(s) due to processing taking longer than one period")
                 }
             }
-
         GotoFinish:
         }(u)
     }

@@ -125,8 +125,6 @@ func (bt *Logstashbeat) Run(b *beat.Beat) error {
                     ipAddress := strings.SplitAfter(ipAddresses[i], " ")
                     u.Host = ipAddress[0] + ":" + port
 
-                    fmt.Println(u.Host)
-
                     if bt.hotThreads > 0 {
                         logp.Debug(selector, "Hot threads for url: %v", u)
                         hot_threads, err := bt.GetHotThreads(*u, bt.hotThreads)

@@ -174,7 +174,6 @@ func (bt *Logstashbeat) GetPipelineStats(u url.URL) (*PipelineStats, error) {
     if err != nil {
         return nil, err
     }
-    print([]byte(body))
     stats := &PipelineStats{}
     err = json.Unmarshal([]byte(body), &stats)
     if err != nil {

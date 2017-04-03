@@ -1,6 +1,7 @@
 /.idea
 /build
-
+/vendor
+/logs
 .DS_Store
 /logstashbeat
 /logstashbeat.test

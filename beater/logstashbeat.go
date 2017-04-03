@@ -4,6 +4,8 @@ import (
     "errors"
     "fmt"
     "net/url"
+    "net"
+    "strings"
     "time"
 
     "github.com/elastic/beats/libbeat/beat"
@@ -84,13 +86,13 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
         return nil, errors.New("Invalid statistics configuration")
     }
 
-    logp.Debug(selector, "Init logstashbeat")
-    logp.Debug(selector, "Period %v\n", bt.config.Period)
-    logp.Debug(selector, "Watch %v", bt.urls)
-    logp.Debug(selector, "Capture %v hot threads\n", bt.hotThreads)
-    logp.Debug(selector, "JVM statistics %t\n", bt.jvmStats)
-    logp.Debug(selector, "Process statistics %t\n", bt.processStats)
-    logp.Debug(selector, "Pipeline statistics %t\n", bt.pipelineStats)
+    logp.Info("Init logstashbeat")
+    logp.Info("Period %v\n", bt.config.Period)
+    logp.Info("Watch %v", bt.urls)
+    logp.Info("Capture %v hot threads\n", bt.hotThreads)
+    logp.Info("JVM statistics %t\n", bt.jvmStats)
+    logp.Info("Process statistics %t\n", bt.processStats)
+    logp.Info("Pipeline statistics %t\n", bt.pipelineStats)
 
     return bt, nil
 }
@@ -103,6 +105,9 @@ func (bt *Logstashbeat) Run(b *beat.Beat) error {
     for _, u := range bt.urls {
         go func(u *url.URL) {
 
+            s := strings.Split(u.Host, ":")
+            host, port := s[0], s[1]
+
             ticker := time.NewTicker(bt.config.Period)
             counter := 1
             for {
@@ -114,94 +119,110 @@ func (bt *Logstashbeat) Run(b *beat.Beat) error {
 
                 timerStart := time.Now()
 
-                if bt.hotThreads > 0 {
-                    logp.Debug(selector, "Hot threads for url: %v", u)
-                    hot_threads, err := bt.GetHotThreads(*u, bt.hotThreads)
+                // We want iterate for each dns resolved IP
+                ipAddresses, _ := net.LookupHost(host)
+                for i := 0; i < len(ipAddresses); i++  {
+                    ipAddress := strings.SplitAfter(ipAddresses[i], " ")
+                    u.Host = ipAddress[0] + ":" + port
 
-                    if err != nil {
-                        logp.Err("Error retrieving hot threads: %v", err)
-                    } else {
-                        logp.Debug(selector, "Hot threads detail: %+v", hot_threads)
+                    fmt.Println(u.Host)
 
-                        event := common.MapStr{
-                            "@timestamp": common.Time(time.Now()),
-                            "type": "hot_threads",
-                            "counter": counter,
-                            "hot_threads": hot_threads,
+                    if bt.hotThreads > 0 {
+                        logp.Debug(selector, "Hot threads for url: %v", u)
+                        hot_threads, err := bt.GetHotThreads(*u, bt.hotThreads)
+
+                        if err != nil {
+                            logp.Err("Error retrieving hot threads: %v", err)
+                        } else {
+                            logp.Debug(selector, "Hot threads detail: %+v", hot_threads)
+
+                            event := common.MapStr{
+                                "@timestamp":   common.Time(time.Now()),
+                                "type":         "hot_threads",
+                                "counter":      counter,
+                                "ipv4":         u.Host,
+                                "domain":       host,
+                                "hot_threads":  hot_threads,
+                            }
+
+                            bt.client.PublishEvent(event)
+                            logp.Debug(selector, "Logstash hot threads sent")
+                            counter++
                         }
+                    }
 
-                        bt.client.PublishEvent(event)
-                        logp.Info("Logstash hot threads sent")
-                        counter++
+                    if bt.jvmStats {
+                        logp.Debug(selector, "JVM stats for url: %v", u)
+                        jvm_stats, err := bt.GetJvmStats(*u)
+
+                        if err != nil {
+                            logp.Err("Error reading JVM stats: %v", err)
+                        } else {
+                            logp.Debug(selector, "JVM stats detail: %+v", jvm_stats)
+
+                            event := common.MapStr{
+                                "@timestamp":   common.Time(time.Now()),
+                                "type":         "jvm",
+                                "counter":      counter,
+                                "ipv4":         u.Host,
+                                "domain":       host,
+                                "jvm":          jvm_stats.Jvm,
+                            }
+
+                            bt.client.PublishEvent(event)
+                            logp.Debug(selector, "Logstash JVM stats sent")
+                            counter++
+                        }
+                    }
+
+                    if bt.processStats {
+                        logp.Debug(selector, "Process stats for url: %v", u)
+                        process_stats, err := bt.GetProcessStats(*u)
+
+                        if err != nil {
+                            logp.Err("Error reading process stats: %v", err)
+                        } else {
+                            logp.Debug(selector, "Process stats detail: %+v", process_stats)
+
+                            event := common.MapStr{
+                                "@timestamp": common.Time(time.Now()),
+                                "type":       "process",
+                                "counter":    counter,
+                                "ipv4":       u.Host,
+                                "domain":     host,
+                                "process":    process_stats.Process,
+                            }
+
+                            bt.client.PublishEvent(event)
+                            logp.Debug(selector, "Logstash process stats sent")
+                            counter++
+                        }
+                    }
+
+                    if bt.pipelineStats {
+                        logp.Debug(selector, "Pipeline stats for url: %v", u)
+                        pipeline_stats, err := bt.GetPipelineStats(*u)
+
+                        if err != nil {
+                            logp.Err("Error reading pipeline stats: %v", err)
+                        } else {
+                            logp.Debug(selector, "Pipeline stats detail: %+v", pipeline_stats)
+
+                            event := common.MapStr{
+                                "@timestamp": common.Time(time.Now()),
+                                "type":       "pipeline",
+                                "counter":    counter,
+                                "ipv4":       u.Host,
+                                "domain":     host,
+                                "pipeline":   pipeline_stats.Pipeline,
+                            }
+
+                            bt.client.PublishEvent(event)
+                            logp.Debug(selector, "Logstash pipeline stats sent")
+                            counter++
+                        }
                     }
                 }
-
-                if bt.jvmStats {
-                    logp.Debug(selector, "JVM stats for url: %v", u)
-                    jvm_stats, err := bt.GetJvmStats(*u)
-
-                    if err != nil {
-                        logp.Err("Error reading JVM stats: %v", err)
-                    } else {
-                        logp.Debug(selector, "JVM stats detail: %+v", jvm_stats)
-
-                        event := common.MapStr{
-                            "@timestamp":   common.Time(time.Now()),
-                            "type":         "jvm",
-                            "counter":      counter,
-                            "jvm":          jvm_stats.Jvm,
-                        }
-
-                        bt.client.PublishEvent(event)
-                        logp.Info("Logstash JVM stats sent")
-                        counter++
-                    }
-                }
-
-                if bt.processStats {
-                    logp.Debug(selector, "Process stats for url: %v", u)
-                    process_stats, err := bt.GetProcessStats(*u)
-
-                    if err != nil {
-                        logp.Err("Error reading process stats: %v", err)
-                    } else {
-                        logp.Debug(selector, "Process stats detail: %+v", process_stats)
-
-                        event := common.MapStr{
-                            "@timestamp": common.Time(time.Now()),
-                            "type":       "process",
-                            "counter":    counter,
-                            "process": process_stats.Process,
-                        }
-
-                        bt.client.PublishEvent(event)
-                        logp.Info("Logstash process stats sent")
-                        counter++
-                    }
-                }
-
-                if bt.pipelineStats {
-                    logp.Debug(selector, "Pipeline stats for url: %v", u)
-                    pipeline_stats, err := bt.GetPipelineStats(*u)
-
-                    if err != nil {
-                        logp.Err("Error reading pipeline stats: %v", err)
-                    } else {
-                        logp.Debug(selector, "Pipeline stats detail: %+v", pipeline_stats)
-
-                        event := common.MapStr{
-                            "@timestamp": common.Time(time.Now()),
-                            "type":       "pipeline",
-                            "counter":    counter,
-                            "pipeline": pipeline_stats.Pipeline,
-                        }
-
-                        bt.client.PublishEvent(event)
-                        logp.Info("Logstash pipeline stats sent")
-                        counter++
-                    }
-                }
-
                 timerEnd := time.Now()
                 duration := timerEnd.Sub(timerStart)
                 if duration.Nanoseconds() > bt.config.Period.Nanoseconds() {
@@ -217,7 +238,7 @@ func (bt *Logstashbeat) Run(b *beat.Beat) error {
 }
 
 func (bt *Logstashbeat) Stop() {
-    logp.Debug(selector, "Stop logstashbeat")
+    logp.Info(selector, "Stop logstashbeat")
     bt.client.Close()
     close(bt.done)
 }

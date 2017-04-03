@@ -1,5 +1,9 @@
 # Logstashbeat
 
+**This fork changed from the original repo in a way that this beat will discover all IPs returned by logstash url API set into the configuration and perform an API call for each of them.**
+**This was made to allow the beat to query each logstash instance hiden behind a round robin dns**
+
+
 Welcome to Logstashbeat.
 
 **Important Notes:** 
